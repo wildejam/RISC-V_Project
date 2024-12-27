@@ -1,0 +1,123 @@
+/**
+ * Codasip s.r.o.
+ *
+ * CONFIDENTIAL
+ *
+ * Copyright 2022 Codasip s.r.o.
+ *
+ * All Rights Reserved.
+ *
+ * NOTICE: All information contained in this file, is and shall remain the property of
+ * Codasip s.r.o. and its suppliers, if any.
+ *
+ * The intellectual and technical concepts contained herein are confidential and proprietary to
+ * Codasip s.r.o. and are protected by trade secret and copyright law.  In addition, elements of the
+ * technical concepts may be patent pending.
+ *
+ * This file is part of the Codasip Studio product. No part of the Studio product, including this
+ * file, may be use, copied, modified, or distributed except in accordance with the terms contained
+ * in Codasip license agreement under which you obtained this file.
+ *
+ *  \file   ca_pipe4_me.codal
+ *  \author Codasip
+ *  \date   09.02.2022
+ *  \brief  Memory stage - cycle accurate model
+ */
+
+#include "ca_defines.hcodal"
+#include "config.hcodal"
+
+// -------------------------------------------------------------------------------------------------
+// Memory Stage
+// -------------------------------------------------------------------------------------------------
+event me : pipeline(pipe.ME)
+{
+    use me_output;
+    use me_memory;
+
+    semantics
+    {
+        switch (r_me_branchop) {
+            case BRANCH_COND_TRUE:
+                s_me_pcsrc = r_me_zero;
+                break;
+
+            case BRANCH_COND_FALSE:
+                s_me_pcsrc = !r_me_zero;
+                break;
+
+            case BRANCH_TRUE:
+                s_me_pcsrc = 1;
+                break;
+
+            case BRANCH_FALSE:
+                s_me_pcsrc = 0;
+                break;
+        }
+
+        me_memory();
+        me_output();
+    };
+};
+
+event me_memory : pipeline(pipe.ME)
+{
+    semantics
+    {
+        uint1 data_ready;
+        uint1 data_response;
+        uint32 load_data_temp;
+
+        if (r_me_memop == MEM_NOP){
+            data_ready = 1;
+            data_response = 0;
+            load_data_temp = 0;
+        }
+        else {
+            ldst.transport(CP_PHS_DATA, data_ready, data_response, load_data_temp, r_me_encoded_data);
+            s_me_decoded_data = ldst.decode_data(load_data_temp, r_me_alu, r_me_memsize);
+        }
+
+        switch(r_me_memop){
+            case MEM_LB:
+                s_me_mem_result = (int32)(int8) s_me_decoded_data;
+                break;
+
+            case MEM_LH:
+                s_me_mem_result = (int32)(int16) s_me_decoded_data;
+                break;
+
+            case MEM_LW:
+                s_me_mem_result = (int32) s_me_decoded_data;
+                break;
+
+            case MEM_LBU:
+                s_me_mem_result = (uint32)(uint8) s_me_decoded_data;
+                break;
+
+            case MEM_LHU:
+                s_me_mem_result = (uint32)(uint16) s_me_decoded_data;
+                break;
+        }
+
+        if (data_ready == 0 && data_response == 0){
+            s_me_stall = 1;
+        }
+
+
+    };
+    
+};
+
+event me_output : pipeline(pipe.ME)
+{
+    semantics
+    {
+        r_wb_pc = r_me_pc;
+        r_wb_alu = r_me_alu;
+        r_wb_rd = r_me_rd;
+        r_wb_instr = r_me_instr;
+        r_wb_regwrite = r_me_regwrite;
+        r_wb_rfwt_sel = r_me_rfwt_sel;
+    };
+};

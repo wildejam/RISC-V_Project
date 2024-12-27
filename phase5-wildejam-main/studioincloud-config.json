@@ -1,0 +1,11 @@
+{
+  "generated-ca-sdk": [
+    "/home/project/rv32i_ca",
+    "phase5_ca",
+    "phase5-wildejam"
+  ],
+  "generated-ia-sdk": [
+    "/home/project/rv32i_ca",
+    "phase5-wildejam"
+  ]
+}

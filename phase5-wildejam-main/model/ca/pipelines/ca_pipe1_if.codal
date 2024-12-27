@@ -1,0 +1,82 @@
+/**
+ * Codasip s.r.o.
+ *
+ * CONFIDENTIAL
+ *
+ * Copyright 2022 Codasip s.r.o.
+ *
+ * All Rights Reserved.
+ *
+ * NOTICE: All information contained in this file, is and shall remain the property of
+ * Codasip s.r.o. and its suppliers, if any.
+ *
+ * The intellectual and technical concepts contained herein are confidential and proprietary to
+ * Codasip s.r.o. and are protected by trade secret and copyright law.  In addition, elements of the
+ * technical concepts may be patent pending.
+ *
+ * This file is part of the Codasip Studio product. No part of the Studio product, including this
+ * file, may be use, copied, modified, or distributed except in accordance with the terms contained
+ * in Codasip license agreement under which you obtained this file.
+ *
+ *  \file   ca_pipe1_if.codal
+ *  \author Codasip
+ *  \date   09.02.2022
+ *  \brief  cycle accurate model
+ */
+
+// -------------------------------------------------------------------------------------------------
+// Fetch stage
+// -------------------------------------------------------------------------------------------------
+
+#include "config.hcodal"
+#include "ca_defines.hcodal"
+
+event fe : pipeline(pipe.IF)
+{
+    use if_output;
+
+    semantics
+    {
+        // -----------------------------------------------------------------------------------------
+        // Pipeline control
+        // -----------------------------------------------------------------------------------------
+        if_code.transport(CP_PHS_ADDRESS, CP_AHB_NONSEQ, CP_AHB_READ, r_pc, CP_AHB_SIZE_32);
+
+        if(r_id_clear){
+            s_id_instr = NOP_INSTRUCTION;
+        }
+        else if (r_id_stall){
+            s_id_instr = r_id_instr_preserved;
+            r_id_pc = r_id_pc_preserved;
+        }
+
+        s_if_nextpc = r_pc + INSTR_SIZE;
+
+        // Multiplexor selects branch address
+        if (s_me_pcsrc) s_if_pcin = r_me_target_address;
+        else s_if_pcin = s_if_nextpc;
+
+        // Set all the clear signals.
+        s_id_clear = 0;
+        s_ex_clear = (s_me_pcsrc || s_id_stall);
+        s_wb_clear = 0;
+        s_me_clear = s_me_pcsrc;
+
+        // Set the local stall signal.
+        s_if_stall = 0;
+
+        // Update the registers
+        if_output();
+    };
+};
+
+event if_output : pipeline(pipe.IF)
+{
+    semantics
+    {
+        r_pc = s_id_stall? r_pc: s_if_pcin;
+        r_id_pc = r_pc;
+        r_id_clear = s_me_pcsrc;
+        r_id_stall = s_id_stall;
+    };
+};

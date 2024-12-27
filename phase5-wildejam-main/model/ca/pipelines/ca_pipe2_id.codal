@@ -1,0 +1,219 @@
+/**
+ * Codasip s.r.o.
+ *
+ * CONFIDENTIAL
+ *
+ * Copyright 2022 Codasip s.r.o.
+ *
+ * All Rights Reserved.
+ *
+ * NOTICE: All information contained in this file, is and shall remain the property of
+ * Codasip s.r.o. and its suppliers, if any.
+ *
+ * The intellectual and technical concepts contained herein are confidential and proprietary to
+ * Codasip s.r.o. and are protected by trade secret and copyright law.  In addition, elements of the
+ * technical concepts may be patent pending.
+ *
+ * This file is part of the Codasip Studio product. No part of the Studio product, including this
+ * file, may be use, copied, modified, or distributed except in accordance with the terms contained
+ * in Codasip license agreement under which you obtained this file.
+ *
+ *  \file   ca_pipe2_ex.codal
+ *  \author Codasip
+ *  \date   09.02.2022
+ *  \brief  cycle accurate model
+ */
+
+#include "config.hcodal"
+#include "ca_defines.hcodal"
+
+// -------------------------------------------------------------------------------------------------
+// Decode stage
+// -------------------------------------------------------------------------------------------------
+
+event id : pipeline(pipe.ID)
+{
+    use dec;
+    use id_output;
+
+    semantics
+    {
+        uint32 id_instr_temp;
+        bool cache_ready, cache_response;
+        if_code.transport(CP_PHS_DATA, cache_ready, cache_response, id_instr_temp);
+
+        // Preserve id instr when load hazard is detected
+        if(r_id_clear){
+            s_id_instr = NOP_INSTRUCTION;
+        }
+        else if (r_id_stall){
+            s_id_instr = r_id_instr_preserved;
+            r_id_pc = r_id_pc_preserved;
+        }
+        else{
+            s_id_instr = id_instr_temp;
+        }
+
+
+        // Opcode
+        s_id_opc = s_id_instr [31..25] :: s_id_instr [14..12] :: s_id_instr [6..0];
+        // First source register
+        s_id_rs1 = s_id_instr [19..15];
+        // Second source register
+        s_id_rs2 = s_id_instr [24..20];
+        // Immediate decode
+        s_id_immedi = (( int32 ) ( int12 ) s_id_instr [31..20]); // I - type immediate
+        s_id_immedb = ((int32)(int12)(s_id_instr [31..31] :: s_id_instr [7..7] :: s_id_instr [30..25] :: s_id_instr [11..8])) << 1;
+        s_id_immedu = ( int32 ) ( int20 ) s_id_instr [31..12] << 12;
+        s_id_immeds = ( int32 ) ( int12 ) s_id_instr [31..25] :: s_id_instr [11..7];
+        s_id_immedj = (( int32 ) ( int20 ) (s_id_instr [31..31] :: s_id_instr [19..12] :: s_id_instr [20..20] :: s_id_instr [30..21])) << 1;
+
+        // read contents of input registers
+        s_id_reg1 = rf_xpr.src1[s_id_rs1];
+        s_id_reg2 = rf_xpr.src2[s_id_rs2];
+
+        // set the loadhaz signal
+        if (s_id_rs1 == r_ex_rd || s_id_rs2 == r_ex_rd){
+            switch(r_ex_memop){
+                case MEM_LB:
+                case MEM_LBU:
+                case MEM_LH:
+                case MEM_LHU:
+                case MEM_LW:
+                    s_id_loadhaz = 1;
+                    break;
+                default:
+                    s_id_loadhaz = 0;
+                    break;
+
+            }
+        }
+        else{
+            s_id_loadhaz = 0;
+        }
+
+        // pipeline preserved pc and instr into preserved registers in case they are needed for a stall
+        r_id_pc_preserved = r_id_pc;
+        r_id_instr_preserved = s_id_instr;
+
+        // Set local stall.
+        s_id_stall = s_ex_stall || s_id_loadhaz;
+
+        // If WB is writing back && that written back register
+        // is the same as src1 from the latest instruction,
+        // then take the forwarded WB value.
+        if ((r_wb_rd != 0) && (r_wb_rd == s_id_rs1)) {
+            s_rff1_sel = 0;
+        }
+        // Else, take the src value as normal.
+        else {
+            s_rff1_sel = 1;
+        }
+
+        // Same logic as before, but for src2
+        if ((r_wb_rd != 0) && (r_wb_rd == s_id_rs2)) {
+            s_rff2_sel = 0;
+        }
+        // Else, take the src value as normal.
+        else {
+            s_rff2_sel = 1;
+        }
+
+        // Switch statements to place appropriate source
+        // Into signals depending on rff_sel values
+        switch (s_rff1_sel){
+            case 0:
+                s_id_val1 = s_wb_result;
+                break;
+            case 1:
+                s_id_val1 = s_id_reg1;
+                break;
+            default:
+                s_id_val1 = 0;
+        }
+        switch (s_rff2_sel){
+            case 0:
+                s_id_val2 = s_wb_result;
+                break;
+            case 1:
+                s_id_val2 = s_id_reg2;
+                break;
+            default:
+                s_id_val2 = 0;
+        }
+
+        // Decoder activation
+        dec(s_id_opc);
+        // Select imm based on immsel, which is calculated above
+        switch (s_id_immsel) {
+            case IMM_ITYPE:
+                s_id_immed = s_id_immedi;
+                // Destination register
+                s_id_rd = s_id_instr [11..7];
+                break;
+            case IMM_STYPE:
+                s_id_immed = s_id_immeds;
+                // Destination register
+                s_id_rd = DONT_CARE;
+                break;
+
+            case IMM_BTYPE:
+                s_id_immed = s_id_immedb;
+                // Destination register
+                s_id_rd = DONT_CARE;
+                break;
+
+            case IMM_JTYPE:
+                s_id_immed = s_id_immedj;
+                // Destination register
+                s_id_rd = s_id_instr [11..7];
+                break;
+
+            case IMM_UTYPE:
+                s_id_immed = s_id_immedu;
+                // Destination register
+                s_id_rd = s_id_instr [11..7];
+                break;
+
+            case IMM_NONE:
+                s_id_immed = 0;
+                // Destination register
+                s_id_rd = s_id_instr [11..7];
+                break;
+
+            default:
+                s_id_immed = IMM_ERROR;
+                break;
+        }
+
+        // Update the registers
+        id_output();
+    };
+};
+event id_output : pipeline(pipe.ID)
+{
+
+    semantics
+    {
+        // -----------------------------------------------------------------------------------------
+        // Pipeline output
+        // -----------------------------------------------------------------------------------------
+        r_ex_pc = r_id_pc;
+        r_ex_aluop = s_id_aluop;
+        r_ex_regwrite = s_id_regwrite;
+        r_ex_alusrc2 = s_id_alusrc2;
+        r_ex_halt = s_id_halt;
+        r_ex_branchop = s_id_branchop;
+        r_ex_rfwt_sel = s_id_rfwt_sel;
+        r_ex_brnch_sel = s_id_brnch_sel;
+        r_ex_alusrc1 = s_id_alusrc1;
+        r_ex_reg1 = s_id_val1;
+        r_ex_reg2 = s_id_val2;
+        r_ex_immed = s_id_immed;
+        r_ex_rd = s_id_rd;
+        r_ex_instr = s_id_instr;
+        r_ex_src1 = s_id_rs1;
+        r_ex_src2 = s_id_rs2;
+        r_ex_memop = s_id_memop;
+    };
+};

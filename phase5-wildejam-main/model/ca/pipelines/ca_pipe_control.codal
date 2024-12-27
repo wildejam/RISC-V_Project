@@ -1,0 +1,76 @@
+/**
+ * Codasip s.r.o.
+ *
+ * CONFIDENTIAL
+ *
+ * Copyright 2022 Codasip s.r.o.
+ *
+ * All Rights Reserved.
+ *
+ * NOTICE: All information contained in this file, is and shall remain the property of
+ * Codasip s.r.o. and its suppliers, if any.
+ *
+ * The intellectual and technical concepts contained herein are confidential and proprietary to
+ * Codasip s.r.o. and are protected by trade secret and copyright law.  In addition, elements of the
+ * technical concepts may be patent pending.
+ *
+ * This file is part of the Codasip Studio product. No part of the Studio product, including this
+ * file, may be use, copied, modified, or distributed except in accordance with the terms contained
+ * in Codasip license agreement under which you obtained this file.
+ *
+ *  \file   ca_pipe_control.codal
+ *  \author Codasip
+ *  \date   09.02.2022
+ *  \brief  Pipe control - cycle accurate model
+ */
+
+#include "debug.hcodal"
+#include "ca_defines.hcodal"
+
+event pipeline_control : pipeline(pipe.IF)
+{
+    semantics
+    {
+        print_pipeline();
+        if(s_if_stall){
+            pipe.IF.stall();
+            codasip_info(INFO_PIPE, "pipeline IF stall\n");
+        }
+
+        if(s_id_stall){
+            pipe.ID.stall();
+             codasip_info(INFO_PIPE, "pipeline ID stall\n");
+        }
+        else if(s_id_clear){
+            pipe.ID.clear();
+             codasip_info(INFO_PIPE, "pipeline ID clear\n");
+        }
+
+        if(s_ex_stall){
+            pipe.EX.stall();
+             codasip_info(INFO_PIPE, "pipeline EX stall\n");
+        }
+        else if(s_ex_clear){
+            pipe.EX.clear();
+             codasip_info(INFO_PIPE, "pipeline EX clear\n");
+        }
+
+        if(s_me_stall){
+            pipe.ME.stall();
+             codasip_info(INFO_PIPE, "pipeline ME stall\n");
+        }
+        else if(s_me_clear){
+            pipe.ME.clear();
+             codasip_info(INFO_PIPE, "pipeline ME clear\n");
+        }
+
+        if(s_wb_stall){
+            pipe.WB.stall();
+             codasip_info(INFO_PIPE, "pipeline WB stall\n");
+        }
+        else if(s_wb_clear){
+            pipe.WB.clear();
+             codasip_info(INFO_PIPE, "pipeline WB clear\n");
+        }
+    };
+};

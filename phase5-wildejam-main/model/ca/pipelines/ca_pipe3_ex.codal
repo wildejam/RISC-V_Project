@@ -1,0 +1,400 @@
+/**
+ * Codasip s.r.o.
+ *
+ * CONFIDENTIAL
+ *
+ * Copyright 2022 Codasip s.r.o.
+ *
+ * All Rights Reserved.
+ *
+ * NOTICE: All information contained in this file, is and shall remain the property of
+ * Codasip s.r.o. and its suppliers, if any.
+ *
+ * The intellectual and technical concepts contained herein are confidential and proprietary to
+ * Codasip s.r.o. and are protected by trade secret and copyright law.  In addition, elements of the
+ * technical concepts may be patent pending.
+ *
+ * This file is part of the Codasip Studio product. No part of the Studio product, including this
+ * file, may be use, copied, modified, or distributed except in accordance with the terms contained
+ * in Codasip license agreement under which you obtained this file.
+ *
+ *  \file   ca_pipe3_ex.codal
+ *  \author Codasip
+ *  \date   09.02.2022
+ *  \brief  Execute stage - cycle accurate model
+ */
+
+#include "ca_defines.hcodal"
+#include "debug.hcodal"
+
+// -------------------------------------------------------------------------------------------------
+// Execute Stage
+// -------------------------------------------------------------------------------------------------
+event ex : pipeline(pipe.EX)
+{
+    use ex_output;
+    use ex_memory;
+
+    semantics
+    {
+
+        // Data hazard forwarding: set the select bit
+        if ((r_me_rd != 0) && (r_me_rd == r_ex_src1))
+        {
+            s_ex_fwdA_sl = 1;
+        }
+        else if ((r_wb_rd != 0) && (r_wb_rd == r_ex_src1))
+        {
+            s_ex_fwdA_sl = 2;
+        }
+        else
+        {
+            s_ex_fwdA_sl = 0;
+        }
+
+        if ((r_me_rd != 0) && (r_me_rd == r_ex_src2))
+        {
+            s_ex_fwdB_sl = 1;
+        }
+        else if ((r_wb_rd != 0) && (r_wb_rd == r_ex_src2))
+        {
+            s_ex_fwdB_sl = 2;
+        }
+        else
+        {
+            s_ex_fwdB_sl = 0;
+        }
+
+        // Data hazard forwarding: muxes
+        switch(s_ex_fwdA_sl)
+        {
+            case 0:
+                s_ex_mplx1 = r_ex_reg1;
+                break;
+            case 1:
+                s_ex_mplx1 = r_me_alu;
+                break;
+            case 2:
+                s_ex_mplx1 = s_wb_result;
+                break;
+            default:
+                s_ex_mplx1 = 0;
+                break;
+        }
+        switch(s_ex_fwdB_sl)
+        {
+            case 0:
+                s_ex_mplx2 = r_ex_reg2;
+                break;
+            case 1:
+                s_ex_mplx2 = r_me_alu;
+                break;
+            case 2:
+                s_ex_mplx2 = s_wb_result;
+                break;
+            default:
+                s_ex_mplx2 = 0;
+                break;
+        }
+
+        switch (r_ex_alusrc2)
+        {
+            case ALU2_REG:
+                s_ex_src2 = s_ex_mplx2;
+                break;
+            
+            case ALU2_IMM:
+                s_ex_src2 = r_ex_immed;
+                break;
+            
+            default:
+                s_ex_src2 = 0;
+                codasip_fatal(SRC2_ERROR, "Default case: %d\n", r_ex_alusrc2);
+                break;
+        }
+
+        // Calculate branch addr component
+        s_ex_brimm = r_ex_pc + r_ex_immed;
+
+        // Muliplexor selects src1
+        switch(r_ex_alusrc1)
+        {
+            case ALU_SRC1_PC:
+                s_ex_src1 = r_ex_pc;
+                break;
+
+            case ALU_SRC1_ZERO:
+                s_ex_src1 = 0;
+                break;
+
+            case ALU_SRC1_REG:
+                s_ex_src1 = s_ex_mplx1;
+                break;
+        }
+        
+
+        // Perform ALU operation
+        switch (r_ex_aluop)
+        {
+            //Nop
+            case ALU_NOP:
+                s_ex_alu = 0;
+                break;
+
+            case ALU_ADD:
+                s_ex_alu = s_ex_src1 + s_ex_src2;
+                break;
+
+            case ALU_SUB:
+                s_ex_alu = s_ex_src1 - s_ex_src2;
+                break;
+
+            case ALU_AND:
+                s_ex_alu = s_ex_src1 & s_ex_src2;
+                break;
+
+            case ALU_OR:
+                s_ex_alu = s_ex_src1 | s_ex_src2;
+                break;
+
+            case ALU_XOR:
+                s_ex_alu = s_ex_src1 ^ s_ex_src2;
+                break;
+
+            case ALU_SLT:
+                if((int32) s_ex_src1 < (int32) s_ex_src2) s_ex_alu = 1;
+                else s_ex_alu = 0;
+                break;
+
+            case ALU_SLTU:
+                if(s_ex_src1 < s_ex_src2) s_ex_alu = 1;
+                else s_ex_alu = 0;
+                break;
+
+            case ALU_SLL:
+                s_ex_alu = s_ex_src1 << s_ex_src2;
+                break;
+
+            case ALU_SRL:
+                s_ex_alu = s_ex_src1 >> (uint5) s_ex_src2;
+                break;
+
+            case ALU_SRA:
+                s_ex_alu = (int32) s_ex_src1 >> (uint5) s_ex_src2;
+                break;
+
+            case ALU_ENC:
+                // HEADS UP: the write-up seems to imply p32 isn't included for some reason? I included it anyway because that contradicts other parts of the write-up, as well as what makes sense
+                s_ex_p1 = s_ex_src1[0..0] ^ s_ex_src1[1..1] ^ s_ex_src1[3..3] ^ s_ex_src1[4..4] ^ s_ex_src1[6..6] ^ s_ex_src1[8..8] ^ s_ex_src1[10..10] ^ s_ex_src1[11..11] ^ s_ex_src1[13..13] ^ s_ex_src1[15..15];
+                s_ex_p2 = s_ex_src1[0..0] ^ s_ex_src1[2..2] ^ s_ex_src1[3..3] ^ s_ex_src1[5..5] ^ s_ex_src1[6..6] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[12..12] ^ s_ex_src1[13..13];
+                s_ex_p4 = s_ex_src1[1..1] ^ s_ex_src1[2..2] ^ s_ex_src1[3..3] ^ s_ex_src1[7..7] ^ s_ex_src1[8..8] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[14..14] ^ s_ex_src1[15..15];
+                s_ex_p8 = s_ex_src1[4..4] ^ s_ex_src1[5..5] ^ s_ex_src1[6..6] ^ s_ex_src1[7..7] ^ s_ex_src1[8..8] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10];
+                s_ex_p16 = s_ex_src1[11..11] ^ s_ex_src1[12..12] ^ s_ex_src1[13..13] ^ s_ex_src1[14..14] ^ s_ex_src1[15..15];
+                s_ex_p32 = s_ex_p1[0..0] ^ s_ex_p2[0..0] ^ s_ex_p4[0..0] ^ s_ex_p8[0..0] ^ s_ex_p16[0..0] ^ s_ex_src1[0..0] ^ s_ex_src1[1..1] ^ s_ex_src1[2..2] ^ s_ex_src1[3..3] ^ s_ex_src1[4..4] ^ s_ex_src1[5..5] ^ s_ex_src1[6..6] ^ s_ex_src1[7..7] ^ s_ex_src1[8..8] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[11..11] ^ s_ex_src1[12..12] ^ s_ex_src1[13..13] ^ s_ex_src1[14..14] ^ s_ex_src1[15..15];
+
+                s_ex_alu = s_ex_p32[0..0] :: s_ex_p16[0..0] :: s_ex_p8[0..0] :: s_ex_p4[0..0] :: s_ex_p2[0..0] :: s_ex_p1[0..0] :: s_ex_src1[15..0];
+                break;
+
+            case ALU_DEC:
+                s_ex_p1 = s_ex_src1[0..0] ^ s_ex_src1[1..1] ^ s_ex_src1[3..3] ^ s_ex_src1[4..4] ^ s_ex_src1[6..6] ^ s_ex_src1[8..8] ^ s_ex_src1[10..10] ^ s_ex_src1[11..11] ^ s_ex_src1[13..13] ^ s_ex_src1[15..15] ^ s_ex_src1[16..16];
+                s_ex_p2 = s_ex_src1[0..0] ^ s_ex_src1[2..2] ^ s_ex_src1[3..3] ^ s_ex_src1[5..5] ^ s_ex_src1[6..6] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[12..12] ^ s_ex_src1[13..13] ^ s_ex_src1[17..17];
+                s_ex_p4 = s_ex_src1[1..1] ^ s_ex_src1[2..2] ^ s_ex_src1[3..3] ^ s_ex_src1[7..7] ^ s_ex_src1[8..8] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[14..14] ^ s_ex_src1[15..15] ^ s_ex_src1[18..18];
+                s_ex_p8 = s_ex_src1[4..4] ^ s_ex_src1[5..5] ^ s_ex_src1[6..6] ^ s_ex_src1[7..7] ^ s_ex_src1[8..8] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[19..19];
+                s_ex_p16 = s_ex_src1[11..11] ^ s_ex_src1[12..12] ^ s_ex_src1[13..13] ^ s_ex_src1[14..14] ^ s_ex_src1[15..15] ^ s_ex_src1[20..20];
+                s_ex_p32 = s_ex_src1[16..16] ^ s_ex_src1[17..17] ^ s_ex_src1[18..18] ^ s_ex_src1[19..19] ^ s_ex_src1[20..20] ^ s_ex_src1[0..0] ^ s_ex_src1[1..1] ^ s_ex_src1[2..2] ^ s_ex_src1[3..3] ^ s_ex_src1[4..4] ^ s_ex_src1[5..5] ^ s_ex_src1[6..6] ^ s_ex_src1[7..7] ^ s_ex_src1[8..8] ^ s_ex_src1[9..9] ^ s_ex_src1[10..10] ^ s_ex_src1[11..11] ^ s_ex_src1[12..12] ^ s_ex_src1[13..13] ^ s_ex_src1[14..14] ^ s_ex_src1[15..15] ^ s_ex_src1[21..21];
+
+                s_ex_ecc = s_ex_p32[0..0] :: s_ex_p16[0..0] :: s_ex_p8[0..0] :: s_ex_p4[0..0] :: s_ex_p2[0..0] :: s_ex_p1[0..0];
+
+                // Determine error based on ecc syndrome
+                switch(s_ex_ecc){
+                    case 0:
+                        s_ex_alu = (s_ex_src1 & 0xFFFF);
+                        break;
+                    case 32:
+                        s_ex_alu = ((s_ex_src1 ^ 0x200000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 33:
+                        s_ex_alu = ((s_ex_src1 ^ 0x10000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 34:
+                        s_ex_alu = ((s_ex_src1 ^ 0x20000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 35:
+                        s_ex_alu = ((s_ex_src1 ^ 0x1) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 36:
+                        s_ex_alu = ((s_ex_src1 ^ 0x40000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 37:
+                        s_ex_alu = ((s_ex_src1 ^ 0x2) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 38:
+                        s_ex_alu = ((s_ex_src1 ^ 0x4) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 39:
+                        s_ex_alu = ((s_ex_src1 ^ 0x8) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 40:
+                        s_ex_alu = ((s_ex_src1 ^ 0x80000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 41:
+                        s_ex_alu = ((s_ex_src1 ^ 0x10) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 42:
+                        s_ex_alu = ((s_ex_src1 ^ 0x20) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 43:
+                        s_ex_alu = ((s_ex_src1 ^ 0x40) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 44:
+                        s_ex_alu = ((s_ex_src1 ^ 0x80) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 45:
+                        s_ex_alu = ((s_ex_src1 ^ 0x100) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 46:
+                        s_ex_alu = ((s_ex_src1 ^ 0x200) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 47:
+                        s_ex_alu = ((s_ex_src1 ^ 0x400) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 48:
+                        s_ex_alu = ((s_ex_src1 ^ 0x100000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 49:
+                        s_ex_alu = ((s_ex_src1 ^ 0x800) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 50:
+                        s_ex_alu = ((s_ex_src1 ^ 0x1000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 51:
+                        s_ex_alu = ((s_ex_src1 ^ 0x2000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 52:
+                        s_ex_alu = ((s_ex_src1 ^ 0x4000) & 0xFFFF) | 0x40000000;
+                        break;
+                    case 53:
+                        s_ex_alu = ((s_ex_src1 ^ 0x8000) & 0xFFFF) | 0x40000000;
+                        break;
+                    default:
+                        s_ex_alu = 0x80000000u;
+                        break;
+                }
+
+
+                break;
+            default:
+                s_ex_alu = 0;
+                break;
+        }
+
+        // Memory event
+        ex_memory();
+
+        // Multiplexor chooses new target address
+        switch(r_ex_brnch_sel)
+        {
+            case BRADD_ADDR:
+                s_ex_target_address = s_ex_brimm;
+                break;
+
+            case BRADD_ALU:
+                s_ex_target_address = s_ex_alu;
+                break;
+        }
+
+        // ALU zero signal
+        s_ex_zero = !s_ex_alu;
+
+        // HALT instruction detection
+        if (r_ex_halt == HALT_HALT)
+        {
+            codasip_break();
+            codasip_info(INFO_GENERAL, "Halt Instructions Indicated");
+        }
+
+        // Timing
+        ex_output();
+    };
+};
+
+event ex_memory : pipeline(pipe.EX)
+{
+    semantics
+    {
+        uint1 op_rw;
+        uint2 op_type;
+
+        switch(r_ex_memop)
+        {
+            case MEM_LB:
+                op_rw = CP_AHB_READ;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_8;
+                break;
+            case MEM_LH:
+                op_rw = CP_AHB_READ;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_16;
+                break;
+            case MEM_LW:
+                op_rw = CP_AHB_READ;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_32;
+                break;
+            case MEM_LBU:
+                op_rw = CP_AHB_READ;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_8;
+                break;
+            case MEM_LHU:
+                op_rw = CP_AHB_READ;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_16;
+                break;
+            case MEM_SB:
+                op_rw = CP_AHB_WRITE;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_8;
+                break;
+            case MEM_SH:
+                op_rw = CP_AHB_WRITE;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_16;
+                break;
+            case MEM_SW:
+                op_rw = CP_AHB_WRITE;
+                op_type = CP_AHB_NONSEQ;
+                s_ex_memsize = CP_AHB_SIZE_32;
+                break;
+            default:
+                op_rw = DONT_CARE;
+                op_type = CP_AHB_IDLE;
+                s_ex_memsize = DONT_CARE;
+                break;
+        }
+        ldst.transport(CP_PHS_ADDRESS, op_type, op_rw, s_ex_alu, s_ex_memsize);
+        s_ex_encoded_data = ldst.encode_data(s_ex_mplx2, s_ex_alu, s_ex_memsize);
+
+        s_ex_stall = s_me_stall;
+    };
+};
+
+event ex_output : pipeline(pipe.EX)
+{
+    semantics
+    {
+        r_me_pc = r_ex_pc;
+        r_me_alu = s_ex_alu;
+        r_me_zero = s_ex_zero;
+        r_me_target_address = s_ex_target_address;
+        r_me_rd = r_ex_rd;
+        r_me_instr = r_ex_instr;
+        r_me_regwrite = r_ex_regwrite;
+        r_me_rfwt_sel = r_ex_rfwt_sel;
+        r_me_branchop = r_ex_branchop;
+        r_me_memop = r_ex_memop;
+        r_me_memsize = s_ex_memsize;
+        r_me_encoded_data = s_ex_encoded_data;
+    };
+};
